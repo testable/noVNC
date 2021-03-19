@@ -1,7 +1,7 @@
 {
-  "name": "@novnc/novnc",
-  "version": "1.2.0",
-  "description": "An HTML5 VNC client",
+  "name": "novnc-sockjs",
+  "version": "0.0.1",
+  "description": "An HTML5 VNC client with SockJS support",
   "browser": "lib/rfb",
   "directories": {
     "lib": "lib",

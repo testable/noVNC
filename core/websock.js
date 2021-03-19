@@ -29,20 +29,20 @@ const DataChannel = {
 };
 
 const ReadyStates = {
-    CONNECTING: [WebSocket.CONNECTING, DataChannel.CONNECTING],
-    OPEN: [WebSocket.OPEN, DataChannel.OPEN],
-    CLOSING: [WebSocket.CLOSING, DataChannel.CLOSING],
-    CLOSED: [WebSocket.CLOSED, DataChannel.CLOSED],
+    CONNECTING: [SockJS.CONNECTING, WebSocket.CONNECTING, DataChannel.CONNECTING],
+    OPEN: [SockJS.OPEN, WebSocket.OPEN, DataChannel.OPEN],
+    CLOSING: [SockJS.CLOSING, WebSocket.CLOSING, DataChannel.CLOSING],
+    CLOSED: [SockJS.CLOSED, WebSocket.CLOSED, DataChannel.CLOSED],
 };
 
 // Properties a raw channel must have, WebSocket and RTCDataChannel are two examples
 const rawChannelProps = [
     "send",
     "close",
-    "binaryType",
-    "onerror",
-    "onmessage",
-    "onopen",
+    //"binaryType",
+    //"onerror",
+    //"onmessage",
+    //"onopen",
     "protocol",
     "readyState",
 ];
@@ -169,7 +169,7 @@ export default class Websock {
 
     flush() {
         if (this._sQlen > 0 && ReadyStates.OPEN.indexOf(this._websocket.readyState) >= 0) {
-            this._websocket.send(this._encodeMessage());
+            this._encodeMessage().then(this._websocket.send.bind(this._websocket));
             this._sQlen = 0;
         }
     }
@@ -205,7 +205,9 @@ export default class Websock {
     }
 
     open(uri, protocols) {
-        this.attach(new WebSocket(uri, protocols));
+        this.attach(new SockJS(uri, null, {
+          transports: ['websocket', 'xhr-polling', 'xdr-polling']
+        }));
     }
 
     attach(rawChannel) {
@@ -221,7 +223,7 @@ export default class Websock {
         }
 
         this._websocket = rawChannel;
-        this._websocket.binaryType = "arraybuffer";
+        //this._websocket.binaryType = "arraybuffer";
         this._websocket.onmessage = this._recvMessage.bind(this);
 
         const onOpen = () => {
@@ -269,9 +271,8 @@ export default class Websock {
 
     // private methods
     _encodeMessage() {
-        // Put in a binary arraybuffer
-        // according to the spec, you can send ArrayBufferViews with the send method
-        return new Uint8Array(this._sQ.buffer, 0, this._sQlen);
+        // send base64 string on socket
+        return blobUtil.blobToBase64String(blobUtil.arrayBufferToBlob(this._sQ.buffer.slice(0, this._sQlen)));
     }
 
     // We want to move all the unread data to the start of the queue,
@@ -313,26 +314,29 @@ export default class Websock {
 
     // push arraybuffer values onto the end of the receive que
     _DecodeMessage(data) {
-        const u8 = new Uint8Array(data);
-        if (u8.length > this._rQbufferSize - this._rQlen) {
-            this._expandCompactRQ(u8.length);
-        }
-        this._rQ.set(u8, this._rQlen);
-        this._rQlen += u8.length;
+        return blobUtil.blobToArrayBuffer(blobUtil.base64StringToBlob(data)).then((buffer) => {
+            const u8 = new Uint8Array(buffer);
+            if (u8.length > this._rQbufferSize - this._rQlen) {
+                this._expandCompactRQ(u8.length);
+            }
+            this._rQ.set(u8, this._rQlen);
+            this._rQlen += u8.length;
+        });
     }
 
     _recvMessage(e) {
-        this._DecodeMessage(e.data);
-        if (this.rQlen > 0) {
-            this._eventHandlers.message();
-            if (this._rQlen == this._rQi) {
-                // All data has now been processed, this means we
-                // can reset the receive queue.
-                this._rQlen = 0;
-                this._rQi = 0;
+        this._DecodeMessage(e.data).then(() => {
+            if (this.rQlen > 0) {
+                this._eventHandlers.message();
+                if (this._rQlen == this._rQi) {
+                    // All data has now been processed, this means we
+                    // can reset the receive queue.
+                    this._rQlen = 0;
+                    this._rQi = 0;
+                }
+            } else {
+                Log.Debug("Ignoring empty message");
             }
-        } else {
-            Log.Debug("Ignoring empty message");
-        }
+        });
     }
 }
